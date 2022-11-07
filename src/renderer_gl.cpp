@@ -10,7 +10,10 @@
 #	include <bx/timer.h>
 #	include <bx/uint32_t.h>
 #	include "emscripten.h"
+#   include <stdio.h>
 
+bool  g_gles_rt     = false;
+float g_gl_version  = 0;
 namespace bgfx { namespace gl
 {
 	static char s_viewName[BGFX_CONFIG_MAX_VIEWS][BGFX_CONFIG_MAX_VIEW_NAME];
@@ -2313,7 +2316,22 @@ namespace bgfx { namespace gl
 				}
 				else
 				{
-					m_gles3 = BX_ENABLED(BGFX_CONFIG_RENDERER_OPENGLES >= 30);
+                    auto stof = []  (const char* text) -> double {
+                        if(text == nullptr)
+                            return 0;
+                        int32_t len = strlen(text);
+                        for(int index = 0; index < len ; index++){
+                            char ch = text[index];
+                            if( ch > '0' && ch <= '9'){
+                                return atof(text + index);
+                            }
+                        }
+                        return 0;
+                     };
+                    g_gles_rt = strstr(m_version,"OpenGL ES");
+                    g_gl_version = stof(m_version);
+                    m_gles3 = (g_gl_version >= 3.0 && g_gles_rt);
+                    fprintf(stderr,"bgfx running on OpenGL %s version:%f\n",g_gles_rt?"ES":"Core",g_gl_version);
 				}
 			}
 
@@ -2362,15 +2380,15 @@ namespace bgfx { namespace gl
 			{
 #define GL_GET(_pname, _min) BX_TRACE("  " #_pname " %d (min: %d)", glGet(_pname), _min)
 				BX_TRACE("Defaults:");
-#if BGFX_CONFIG_RENDERER_OPENGL >= 41 || BGFX_CONFIG_RENDERER_OPENGLES
-				GL_GET(GL_MAX_FRAGMENT_UNIFORM_VECTORS, 16);
-				GL_GET(GL_MAX_VERTEX_UNIFORM_VECTORS, 128);
-				GL_GET(GL_MAX_VARYING_VECTORS, 8);
-#else
-				GL_GET(GL_MAX_FRAGMENT_UNIFORM_COMPONENTS, 16 * 4);
-				GL_GET(GL_MAX_VERTEX_UNIFORM_COMPONENTS, 128 * 4);
-				GL_GET(GL_MAX_VARYING_FLOATS, 8 * 4);
-#endif // BGFX_CONFIG_RENDERER_OPENGL >= 41 || BGFX_CONFIG_RENDERER_OPENGLES
+                if((!g_gles_rt&&g_gl_version>=4.1) || g_gles_rt){
+                    GL_GET(GL_MAX_FRAGMENT_UNIFORM_VECTORS, 16);
+                    GL_GET(GL_MAX_VERTEX_UNIFORM_VECTORS, 128);
+                    GL_GET(GL_MAX_VARYING_VECTORS, 8);
+                }else{
+                    GL_GET(GL_MAX_FRAGMENT_UNIFORM_COMPONENTS, 16 * 4);
+                    GL_GET(GL_MAX_VERTEX_UNIFORM_COMPONENTS, 128 * 4);
+                    GL_GET(GL_MAX_VARYING_FLOATS, 8 * 4);
+                }
 				GL_GET(GL_MAX_VERTEX_ATTRIBS, 8);
 				GL_GET(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, 8);
 				GL_GET(GL_MAX_CUBE_MAP_TEXTURE_SIZE, 16);
@@ -2396,7 +2414,7 @@ namespace bgfx { namespace gl
 				^ (uint64_t(getGLStringHash(GL_VERSION ) )<<16)
 				;
 
-			if (BX_ENABLED(BGFX_CONFIG_RENDERER_OPENGLES >= 31)
+            if((g_gles_rt && g_gl_version >= 3.1)
 			&&  0 == bx::strCmp(m_vendor, "Imagination Technologies")
 			&&  !bx::strFind(m_version, "(SDK 3.5@3510720)").isEmpty() )
 			{
@@ -2405,7 +2423,7 @@ namespace bgfx { namespace gl
 				s_extension[Extension::ARB_shader_storage_buffer_object].m_initialize = false;
 			}
 
-			if (BX_ENABLED(BGFX_CONFIG_RENDERER_OPENGLES)
+            if( g_gles_rt
 			&&  0 == bx::strCmp(m_vendor, "Imagination Technologies")
 			&&  !bx::strFind(m_version, "1.8@905891").isEmpty() )
 			{
@@ -2518,7 +2536,7 @@ namespace bgfx { namespace gl
 					;
 				s_textureFormat[TextureFormat::ETC1].m_supported |= etc1Supported;
 
-				bool etc2Supported = !!(BGFX_CONFIG_RENDERER_OPENGLES >= 30)
+                bool etc2Supported = !!(g_gles_rt&&g_gl_version>=30)
 					|| s_extension[Extension::ARB_ES3_compatibility].m_supported
 					;
 				s_textureFormat[TextureFormat::ETC2  ].m_supported |= etc2Supported;
@@ -2547,7 +2565,7 @@ namespace bgfx { namespace gl
 				s_textureFormat[TextureFormat::PTC22].m_supported |= ptc2Supported;
 				s_textureFormat[TextureFormat::PTC24].m_supported |= ptc2Supported;
 
-				if (BX_ENABLED(BGFX_CONFIG_RENDERER_OPENGLES) )
+                if (g_gles_rt)
 				{
 					if (m_gles3)
 					{
@@ -2724,7 +2742,7 @@ namespace bgfx { namespace gl
 				}
 
 				const bool computeSupport = false
-					|| !!(BGFX_CONFIG_RENDERER_OPENGLES >= 31)
+                    || !!(g_gles_rt&&g_gl_version>=30)
 					|| s_extension[Extension::ARB_compute_shader].m_supported
 					;
 
@@ -2916,7 +2934,7 @@ namespace bgfx { namespace gl
 					;
 
 				g_caps.limits.maxTextureSize     = uint16_t(glGet(GL_MAX_TEXTURE_SIZE) );
-				g_caps.limits.maxTextureLayers   = BX_ENABLED(BGFX_CONFIG_RENDERER_OPENGL >= 30) || BX_ENABLED(BGFX_CONFIG_RENDERER_OPENGLES >= 30) || s_extension[Extension::EXT_texture_array].m_supported ? uint16_t(bx::max(glGet(GL_MAX_ARRAY_TEXTURE_LAYERS), 1) ) : 1;
+                g_caps.limits.maxTextureLayers   = BX_ENABLED(BGFX_CONFIG_RENDERER_OPENGL >= 30) || (g_gles_rt&&g_gl_version>=30) || s_extension[Extension::EXT_texture_array].m_supported ? uint16_t(bx::max(glGet(GL_MAX_ARRAY_TEXTURE_LAYERS), 1) ) : 1;
 				g_caps.limits.maxComputeBindings = computeSupport ? BGFX_MAX_COMPUTE_BINDINGS : 0;
 				g_caps.limits.maxVertexStreams   = BGFX_CONFIG_MAX_VERTEX_STREAMS;
 
@@ -3033,7 +3051,7 @@ namespace bgfx { namespace gl
                 else
                     g_caps.supported |= m_glctx.getCaps();
 
-				if (BX_ENABLED(BGFX_CONFIG_RENDERER_OPENGLES) )
+                if (g_gles_rt )
 				{
 					m_srgbWriteControlSupport = s_extension[Extension::EXT_sRGB_write_control].m_supported;
 
@@ -3056,11 +3074,10 @@ namespace bgfx { namespace gl
 					GL_CHECK(glGetIntegerv(GL_MAX_SAMPLES, &m_maxMsaa) );
 				}
 
-#if BGFX_CONFIG_RENDERER_OPENGLES && (BGFX_CONFIG_RENDERER_OPENGLES < 30)
-				if (!m_maxMsaa  && s_extension[Extension::IMG_multisampled_render_to_texture].m_supported) {
-					GL_CHECK(glGetIntegerv(GL_MAX_SAMPLES_IMG, &m_maxMsaa) );
-				}
-#endif // BGFX_CONFIG_RENDERER_OPENGLES < 30
+                if(g_gles_rt&&g_gl_version<30)
+                    if (!m_maxMsaa  && s_extension[Extension::IMG_multisampled_render_to_texture].m_supported) {
+                        GL_CHECK(glGetIntegerv(GL_MAX_SAMPLES_IMG, &m_maxMsaa) );
+                    }
 
 				if (s_extension[Extension::OES_read_format].m_supported
 				&& (s_extension[Extension::IMG_read_format].m_supported	|| s_extension[Extension::EXT_read_format_bgra].m_supported) )
@@ -3160,7 +3177,7 @@ namespace bgfx { namespace gl
 					glInsertEventMarker = stubInsertEventMarker;
 				}
 
-				m_maxLabelLen = BX_ENABLED(BGFX_CONFIG_RENDERER_OPENGLES >= 32) || BX_ENABLED(BGFX_CONFIG_RENDERER_OPENGL >= 43) || s_extension[Extension::KHR_debug].m_supported ? uint16_t(glGet(GL_MAX_LABEL_LENGTH) ) : 0;
+                m_maxLabelLen = (g_gles_rt&&g_gl_version>=32) || BX_ENABLED(BGFX_CONFIG_RENDERER_OPENGL >= 43) || s_extension[Extension::KHR_debug].m_supported ? uint16_t(glGet(GL_MAX_LABEL_LENGTH) ) : 0;
 
 				setGraphicsDebuggerPresent(s_extension[Extension::EXT_debug_tool].m_supported);
 
@@ -4827,7 +4844,7 @@ namespace bgfx { namespace gl
 		const char* m_renderer;
 		const char* m_version;
 		const char* m_glslVersion;
-		bool m_gles3;
+		bool m_gles3;        
 
 		Workaround m_workaround;
 
@@ -6319,7 +6336,7 @@ namespace bgfx { namespace gl
 				char* temp = (char*)alloca(tempLen);
 				bx::StaticMemoryBlockWriter writer(temp, tempLen);
 
-				if (BX_ENABLED(BGFX_CONFIG_RENDERER_OPENGLES)
+                if (g_gles_rt
 				&&  !s_renderGL->m_gles3)
 				{
 					bx::write(&writer
@@ -7301,7 +7318,7 @@ namespace bgfx { namespace gl
 		uint32_t dsFlags = _flags & (BGFX_CLEAR_DISCARD_DEPTH|BGFX_CLEAR_DISCARD_STENCIL);
 		if (BGFX_CLEAR_NONE != dsFlags)
 		{
-			if (!BX_ENABLED(BGFX_CONFIG_RENDERER_OPENGLES)
+            if (!g_gles_rt
 			&&  (BGFX_CLEAR_DISCARD_DEPTH|BGFX_CLEAR_DISCARD_STENCIL) == dsFlags)
 			{
 				buffers[idx++] = GL_DEPTH_STENCIL_ATTACHMENT;
@@ -7576,7 +7593,7 @@ namespace bgfx { namespace gl
 		const bool blendIndependentSupported = s_extension[Extension::ARB_draw_buffers_blend].m_supported;
 		const bool computeSupported = false
 			|| (BX_ENABLED(BGFX_CONFIG_RENDERER_OPENGL) && s_extension[Extension::ARB_compute_shader].m_supported)
-			||  BX_ENABLED(BGFX_CONFIG_RENDERER_OPENGLES >= 31)
+            || (g_gles_rt && g_gl_version>=3.1)
 			;
 		const uint32_t maxComputeBindings = g_caps.limits.maxComputeBindings;
 
