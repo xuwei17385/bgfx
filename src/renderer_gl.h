@@ -35,6 +35,13 @@
 	|| BX_PLATFORM_WINDOWS         \
 	)
 
+//almost all linux desktop can run with egl
+#if(BGFX_USE_GLX)
+#undef BGFX_USE_EGL
+#define BGFX_USE_EGL 1
+#include "glcontext_egl.h"
+#endif
+
 // Keep a state cache of GL uniform values to avoid redundant uploads
 // on the following platforms.
 #define BGFX_GL_CONFIG_UNIFORM_CACHE BX_PLATFORM_EMSCRIPTEN
@@ -143,10 +150,6 @@ typedef uint64_t GLuint64;
 #		include <GLES3/gl3.h>
 #		include <GLES3/gl3ext.h>
 #	endif // BGFX_CONFIG_RENDERER_
-
-#	if BGFX_USE_EGL
-#		include "glcontext_egl.h"
-#	endif // BGFX_USE_EGL
 
 #	if BGFX_USE_HTML5
 #		include "glcontext_html5.h"

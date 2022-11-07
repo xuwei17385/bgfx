@@ -2245,12 +2245,21 @@ namespace bgfx { namespace gl
 			, m_msaaBlitProgram(0)
 			, m_clearQuadColor(BGFX_INVALID_HANDLE)
 			, m_clearQuadDepth(BGFX_INVALID_HANDLE)
+            , m_glctx_egl_(NULL)
 		{
+#ifdef BGFX_USE_EGL
+            if(getenv("BGFX_RUNTIME_REQUEST_EGL")){
+                m_glctx_egl_ = new EglContext();
+            }
+#endif
 			bx::memSet(m_msaaBackBufferRbos, 0, sizeof(m_msaaBackBufferRbos) );
 		}
 
 		~RendererContextGL()
-		{
+        {
+            if(m_glctx_egl_ != nullptr){
+                delete m_glctx_egl_;
+            }
 		}
 
 		bool init(const Init& _init)
@@ -3019,8 +3028,10 @@ namespace bgfx { namespace gl
 					| (computeSupport              ? BGFX_CAPS_COMPUTE                : 0)
 					| (m_imageLoadStoreSupport     ? BGFX_CAPS_IMAGE_RW               : 0)
 					;
-
-				g_caps.supported |= m_glctx.getCaps();
+                if(m_glctx_egl_ != nullptr)
+                    g_caps.supported |= m_glctx_egl_->getCaps();
+                else
+                    g_caps.supported |= m_glctx.getCaps();
 
 				if (BX_ENABLED(BGFX_CONFIG_RENDERER_OPENGLES) )
 				{
@@ -3196,7 +3207,7 @@ namespace bgfx { namespace gl
 				break;
 			}
 
-			m_glctx.destroy();
+            if(m_glctx_egl_)m_glctx_egl_->destroy(); else m_glctx.destroy();
 
 			unloadRenderDoc(m_renderdocdll);
 			return false;
@@ -3226,7 +3237,8 @@ namespace bgfx { namespace gl
 			}
 
 			destroyMsaaFbo();
-			m_glctx.destroy();
+
+            if(m_glctx_egl_)m_glctx_egl_->destroy(); else m_glctx.destroy();
 
 			m_flip = false;
 
@@ -3261,8 +3273,8 @@ namespace bgfx { namespace gl
 				{
 					FrameBufferGL& frameBuffer = m_frameBuffers[m_windows[ii].idx];
 					if (frameBuffer.m_needPresent)
-					{
-						m_glctx.swap(frameBuffer.m_swapChain);
+                    {
+                        if(m_glctx_egl_)m_glctx_egl_->swap(frameBuffer.m_swapChain); else m_glctx.swap(frameBuffer.m_swapChain);
 						frameBuffer.m_needPresent = false;
 					}
 				}
@@ -3271,8 +3283,7 @@ namespace bgfx { namespace gl
 				{
 					// Ensure the back buffer is bound as the source of the flip
 					GL_CHECK(glBindFramebuffer(GL_FRAMEBUFFER, m_backBufferFbo) );
-
-					m_glctx.swap();
+                    if(m_glctx_egl_)m_glctx_egl_->swap();else m_glctx.swap();
 					m_needPresent = false;
 				}
 			}
@@ -3561,7 +3572,7 @@ namespace bgfx { namespace gl
 				height = frameBuffer.m_height;
 			}
 
-			m_glctx.makeCurrent(swapChain);
+            if(m_glctx_egl_)m_glctx_egl_->makeCurrent(swapChain); else m_glctx.makeCurrent(swapChain);
 
 			uint32_t length = width*height*4;
 			uint8_t* data = (uint8_t*)BX_ALLOC(g_allocator, length);
@@ -3814,7 +3825,7 @@ namespace bgfx { namespace gl
 				}
 			}
 
-			m_glctx.makeCurrent(NULL);
+            if(m_glctx_egl_)m_glctx_egl_->makeCurrent();else m_glctx.makeCurrent(NULL);
 
 			if (!isValid(_fbh) )
 			{
@@ -3840,7 +3851,7 @@ namespace bgfx { namespace gl
 				_height = frameBuffer.m_height;
 				if (UINT16_MAX != frameBuffer.m_denseIdx)
 				{
-					m_glctx.makeCurrent(frameBuffer.m_swapChain);
+                    if(m_glctx_egl_)m_glctx_egl_->makeCurrent(frameBuffer.m_swapChain);else m_glctx.makeCurrent(frameBuffer.m_swapChain);
 					GL_CHECK(glFrontFace(GL_CW) );
 
 					frameBuffer.m_needPresent = true;
@@ -3848,7 +3859,7 @@ namespace bgfx { namespace gl
 				}
 				else
 				{
-					m_glctx.makeCurrent(NULL);
+                    if(m_glctx_egl_)m_glctx_egl_->makeCurrent(NULL);else m_glctx.makeCurrent(NULL);
 					m_currentFbo = frameBuffer.m_fbo[0];
 				}
 			}
@@ -3875,9 +3886,12 @@ namespace bgfx { namespace gl
 
 		void createMsaaFbo(uint32_t _width, uint32_t _height, uint32_t _msaa)
 		{
+            bool msaa = m_glctx.m_msaaContext;
+            if(m_glctx_egl_) msaa = m_glctx_egl_->m_msaaContext;
+
 			if (0 == m_msaaBackBufferFbo // iOS
 			&&  1 < _msaa
-			&& !m_glctx.m_msaaContext)
+            && !msaa)
 			{
 				GLenum storageFormat = m_resolution.reset & BGFX_RESET_SRGB_BACKBUFFER
 					? GL_SRGB8_ALPHA8
@@ -4133,9 +4147,13 @@ namespace bgfx { namespace gl
 			if (_width  != 0
 			||  _height != 0)
 			{
-				if (!m_glctx.isValid() )
+                bool valid = m_glctx.isValid();
+                if(m_glctx_egl_)
+                    valid=m_glctx_egl_->isValid();
+
+                if (!valid )
 				{
-					m_glctx.create(_width, _height, _flags);
+                    if(m_glctx_egl_)m_glctx_egl_->create(_width, _height, _flags);else m_glctx.create(_width, _height, _flags);
 
 #if BX_PLATFORM_IOS
 					// iOS: need to figure out how to deal with FBO created by context.
@@ -4146,7 +4164,7 @@ namespace bgfx { namespace gl
 				{
 					destroyMsaaFbo();
 
-					m_glctx.resize(_width, _height, _flags);
+                    if(m_glctx_egl_)m_glctx_egl_->resize(_width, _height, _flags);else m_glctx.resize(_width, _height, _flags);
 
 					uint32_t msaa = (_flags&BGFX_RESET_MSAA_MASK)>>BGFX_RESET_MSAA_SHIFT;
 					msaa = bx::uint32_min(m_maxMsaa, msaa == 0 ? 0 : 1<<msaa);
@@ -4798,6 +4816,7 @@ namespace bgfx { namespace gl
 			GLuint m_msaaBackBufferTextures[2];
 		};
 		GLuint m_msaaBlitProgram;
+        EglContext* m_glctx_egl_;
 		GlContext m_glctx;
 		bool m_needPresent;
 
@@ -7142,7 +7161,10 @@ namespace bgfx { namespace gl
 	void FrameBufferGL::create(uint16_t _denseIdx, void* _nwh, uint32_t _width, uint32_t _height, TextureFormat::Enum _format, TextureFormat::Enum _depthFormat)
 	{
 		BX_UNUSED(_format, _depthFormat);
-		m_swapChain = s_renderGL->m_glctx.createSwapChain(_nwh);
+        if(s_renderGL->m_glctx_egl_)
+            m_swapChain = s_renderGL->m_glctx_egl_->createSwapChain(_nwh);
+        else
+            m_swapChain = s_renderGL->m_glctx.createSwapChain(_nwh);
 		m_width     = _width;
 		m_height    = _height;
 		m_numTh     = 0;
@@ -7160,7 +7182,10 @@ namespace bgfx { namespace gl
 
 		if (NULL != m_swapChain)
 		{
-			s_renderGL->m_glctx.destroySwapChain(m_swapChain);
+            if(s_renderGL->m_glctx_egl_)
+                s_renderGL->m_glctx_egl_->destroySwapChain(m_swapChain);
+            else
+                s_renderGL->m_glctx.destroySwapChain(m_swapChain);
 			m_swapChain = NULL;
 		}
 
@@ -7456,7 +7481,7 @@ namespace bgfx { namespace gl
 			renderDocTriggerCapture();
 		}
 
-		m_glctx.makeCurrent(NULL);
+        if(m_glctx_egl_)m_glctx_egl_->makeCurrent(NULL);else m_glctx.makeCurrent(NULL);
 
 		BGFX_GL_PROFILER_BEGIN_LITERAL("rendererSubmit", kColorView);
 
@@ -8583,7 +8608,7 @@ namespace bgfx { namespace gl
 
 		BGFX_GL_PROFILER_END();
 
-		m_glctx.makeCurrent(NULL);
+        if(m_glctx_egl_)m_glctx_egl_->makeCurrent(NULL);else m_glctx.makeCurrent(NULL);
 		int64_t timeEnd = bx::getHPCounter();
 		int64_t frameTime = timeEnd - timeBegin;
 

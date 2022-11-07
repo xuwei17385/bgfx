@@ -26,20 +26,21 @@ namespace bgfx { namespace gl
 	typedef void (*EGLPROC)(void);
 
 	typedef EGLBoolean  (EGLAPIENTRY* PFNEGLCHOOSECONFIGPROC)(EGLDisplay dpy, const EGLint *attrib_list,	EGLConfig *configs, EGLint config_size,	EGLint *num_config);
-	typedef EGLContext  (EGLAPIENTRY* PFNEGLCREATECONTEXTPROC)(EGLDisplay dpy, EGLConfig config, EGLContext share_context, const EGLint *attrib_list);
+    typedef EGLContext  (EGLAPIENTRY* PFNEGLCREATECONTEXTPROC)(EGLDisplay dpy, EGLConfig config, EGLContext share_context, const EGLint *attrib_list);
 	typedef EGLSurface  (EGLAPIENTRY* PFNEGLCREATEWINDOWSURFACEPROC)(EGLDisplay dpy, EGLConfig config, EGLNativeWindowType win, const EGLint *attrib_list);
 	typedef EGLint      (EGLAPIENTRY* PFNEGLGETERRORPROC)(void);
 	typedef EGLDisplay  (EGLAPIENTRY* PFNEGLGETDISPLAYPROC)(EGLNativeDisplayType display_id);
 	typedef EGLPROC     (EGLAPIENTRY* PFNEGLGETPROCADDRESSPROC)(const char *procname);
 	typedef EGLBoolean  (EGLAPIENTRY* PFNEGLINITIALIZEPROC)(EGLDisplay dpy, EGLint *major, EGLint *minor);
-	typedef EGLBoolean  (EGLAPIENTRY* PFNEGLMAKECURRENTPROC)(EGLDisplay dpy, EGLSurface draw, EGLSurface read, EGLContext ctx);
-	typedef EGLBoolean  (EGLAPIENTRY* PFNEGLDESTROYCONTEXTPROC)(EGLDisplay dpy, EGLContext ctx);
+    typedef EGLBoolean  (EGLAPIENTRY* PFNEGLMAKECURRENTPROC)(EGLDisplay dpy, EGLSurface draw, EGLSurface read, EGLContext ctx);
+    typedef EGLBoolean  (EGLAPIENTRY* PFNEGLDESTROYCONTEXTPROC)(EGLDisplay dpy, EGLContext ctx);
 	typedef EGLBoolean  (EGLAPIENTRY* PFNEGLDESTROYSURFACEPROC)(EGLDisplay dpy, EGLSurface surface);
 	typedef const char* (EGLAPIENTRY* PGNEGLQUERYSTRINGPROC)(EGLDisplay dpy, EGLint name);
 	typedef EGLBoolean  (EGLAPIENTRY* PFNEGLSWAPBUFFERSPROC)(EGLDisplay dpy, EGLSurface surface);
 	typedef EGLBoolean  (EGLAPIENTRY* PFNEGLSWAPINTERVALPROC)(EGLDisplay dpy, EGLint interval);
 	typedef EGLBoolean  (EGLAPIENTRY* PFNEGLTERMINATEPROC)(EGLDisplay dpy);
-
+    typedef EGLSurface  (EGLAPIENTRY* PFNEGLGETCURRENTSURFACEPROC)(EGLint readdraw);
+    typedef EGLContext  (EGLAPIENTRY* PFNEGLGETCURRENTCONTEXTPROC) (void);
 #define EGL_IMPORT                                                          \
 	EGL_IMPORT_FUNC(PFNEGLCHOOSECONFIGPROC,        eglChooseConfig);        \
 	EGL_IMPORT_FUNC(PFNEGLCREATECONTEXTPROC,       eglCreateContext);       \
@@ -54,7 +55,9 @@ namespace bgfx { namespace gl
 	EGL_IMPORT_FUNC(PGNEGLQUERYSTRINGPROC,         eglQueryString);         \
 	EGL_IMPORT_FUNC(PFNEGLSWAPBUFFERSPROC,         eglSwapBuffers);         \
 	EGL_IMPORT_FUNC(PFNEGLSWAPINTERVALPROC,        eglSwapInterval);        \
-	EGL_IMPORT_FUNC(PFNEGLTERMINATEPROC,           eglTerminate);
+    EGL_IMPORT_FUNC(PFNEGLTERMINATEPROC,           eglTerminate);           \
+    EGL_IMPORT_FUNC(PFNEGLGETCURRENTSURFACEPROC,   eglGetCurrentSurface);   \
+    EGL_IMPORT_FUNC(PFNEGLGETCURRENTCONTEXTPROC,   eglGetCurrentContext);
 
 #define EGL_IMPORT_FUNC(_proto, _func) _proto _func
 EGL_IMPORT
@@ -96,14 +99,16 @@ EGL_IMPORT
 	}
 #endif // BGFX_USE_GL_DYNAMIC_LIB
 
+#if !BGFX_USE_GLX
 #	define GL_IMPORT(_optional, _proto, _func, _import) _proto _func = NULL
 #	include "glimports.h"
+#endif
 
 	static EGLint s_contextAttrs[16];
 
-	struct SwapChainGL
+    struct SwapChainEGL
 	{
-		SwapChainGL(EGLDisplay _display, EGLConfig _config, EGLContext _context, EGLNativeWindowType _nwh)
+        SwapChainEGL(EGLDisplay _display, EGLConfig _config, EGLContext _context, EGLNativeWindowType _nwh)
 			: m_nwh(_nwh)
 			, m_display(_display)
 		{
@@ -124,7 +129,7 @@ EGL_IMPORT
             eglMakeCurrent(m_display, defaultSurface, defaultSurface, _context);
 		}
 
-		~SwapChainGL()
+        ~SwapChainEGL()
 		{
             EGLSurface defaultSurface = eglGetCurrentSurface(EGL_DRAW);
             EGLContext defaultContext = eglGetCurrentContext();
@@ -146,7 +151,7 @@ EGL_IMPORT
 		}
 
 		EGLNativeWindowType m_nwh;
-		EGLContext m_context;
+        EGLContext m_context;
 		EGLDisplay m_display;
 		EGLSurface m_surface;
 	};
@@ -155,7 +160,7 @@ EGL_IMPORT
 	static EGL_DISPMANX_WINDOW_T s_dispmanWindow;
 #	endif // BX_PLATFORM_RPI
 
-	void GlContext::create(uint32_t _width, uint32_t _height, uint32_t _flags)
+    void EglContext::create(uint32_t _width, uint32_t _height, uint32_t _flags)
 	{
 #	if BX_PLATFORM_RPI
 		bcm_host_init();
@@ -346,7 +351,7 @@ EGL_IMPORT
 		g_internalData.context = m_context;
 	}
 
-	void GlContext::destroy()
+    void EglContext::destroy()
 	{
 		if (NULL != m_display)
 		{
@@ -364,7 +369,7 @@ EGL_IMPORT
 #	endif // BX_PLATFORM_RPI
 	}
 
-	void GlContext::resize(uint32_t _width, uint32_t _height, uint32_t _flags)
+    void EglContext::resize(uint32_t _width, uint32_t _height, uint32_t _flags)
 	{
 #	if BX_PLATFORM_ANDROID
 		if (NULL != m_display)
@@ -394,7 +399,7 @@ EGL_IMPORT
 		}
 	}
 
-	uint64_t GlContext::getCaps() const
+    uint64_t EglContext::getCaps() const
 	{
 		return BX_ENABLED(0
 						| BX_PLATFORM_LINUX
@@ -406,20 +411,21 @@ EGL_IMPORT
 			;
 	}
 
-	SwapChainGL* GlContext::createSwapChain(void* _nwh)
+    SwapChainGL* EglContext::createSwapChain(void* _nwh)
 	{
-		return BX_NEW(g_allocator, SwapChainGL)(m_display, m_config, m_context, (EGLNativeWindowType)_nwh);
+        return (SwapChainGL*)BX_NEW(g_allocator, SwapChainEGL)(m_display, m_config, m_context, (EGLNativeWindowType)_nwh);
 	}
 
-	void GlContext::destroySwapChain(SwapChainGL* _swapChain)
+    void EglContext::destroySwapChain(SwapChainGL* _swapChain)
 	{
-		BX_DELETE(g_allocator, _swapChain);
+        SwapChainEGL *_swapChainEgl = (SwapChainEGL*)_swapChain;
+        BX_DELETE(g_allocator, _swapChainEgl);
 	}
 
-	void GlContext::swap(SwapChainGL* _swapChain)
+    void EglContext::swap(SwapChainGL* _swapChain)
 	{
 		makeCurrent(_swapChain);
-
+        SwapChainEGL *_swapChainEgl = (SwapChainEGL*)_swapChain;
 		if (NULL == _swapChain)
 		{
 			if (NULL != m_display)
@@ -429,17 +435,18 @@ EGL_IMPORT
 		}
 		else
 		{
-			_swapChain->swapBuffers();
+            _swapChainEgl->swapBuffers();
 		}
 	}
 
-	void GlContext::makeCurrent(SwapChainGL* _swapChain)
+    void EglContext::makeCurrent(SwapChainGL* _swapChain)
 	{
-		if (m_current != _swapChain)
+        SwapChainEGL *_swapChainEgl = (SwapChainEGL*)_swapChain;
+        if (m_current != _swapChainEgl)
 		{
-			m_current = _swapChain;
+            m_current = _swapChainEgl;
 
-			if (NULL == _swapChain)
+            if (NULL == _swapChainEgl)
 			{
 				if (NULL != m_display)
 				{
@@ -448,12 +455,12 @@ EGL_IMPORT
 			}
 			else
 			{
-				_swapChain->makeCurrent();
+                _swapChainEgl->makeCurrent();
 			}
 		}
 	}
 
-	void GlContext::import()
+    void EglContext::import()
 	{
 		BX_TRACE("Import:");
 

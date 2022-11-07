@@ -17,11 +17,11 @@
 
 namespace bgfx { namespace gl
 {
-	struct SwapChainGL;
-
-	struct GlContext
+    struct SwapChainGL;
+    struct SwapChainEGL;
+    struct EglContext
 	{
-		GlContext()
+        EglContext()
 			: m_current(NULL)
 			, m_context(NULL)
 			, m_display(NULL)
@@ -35,10 +35,11 @@ namespace bgfx { namespace gl
 		void resize(uint32_t _width, uint32_t _height, uint32_t _flags);
 
 		uint64_t getCaps() const;
-		SwapChainGL* createSwapChain(void* _nwh);
-		void destroySwapChain(SwapChainGL*  _swapChain);
-		void swap(SwapChainGL* _swapChain = NULL);
-		void makeCurrent(SwapChainGL* _swapChain = NULL);
+        //SwapChainGL just use as a pointer handle outside
+        SwapChainGL* createSwapChain(void* _nwh);
+        void destroySwapChain(SwapChainGL*  _swapChain);
+        void swap(SwapChainGL* _swapChain = NULL);
+        void makeCurrent(SwapChainGL* _swapChain = NULL);
 
 		void import();
 
@@ -48,7 +49,7 @@ namespace bgfx { namespace gl
 		}
 
 		void* m_eglLibrary;
-		SwapChainGL* m_current;
+        SwapChainEGL* m_current;
 		EGLConfig  m_config;
 		EGLContext m_context;
 		EGLDisplay m_display;
@@ -57,6 +58,25 @@ namespace bgfx { namespace gl
 		bool m_msaaContext;
 	};
 } /* namespace gl */ } // namespace bgfx
+#else
+#include <inttypes.h>
+namespace bgfx { namespace gl
+{
+    struct SwapChainGL;
+    struct EglContext{
+        void create(uint32_t _width, uint32_t _height, uint32_t _flags){}
+        void destroy(){}
+        void resize(uint32_t _width, uint32_t _height, uint32_t _flags){}
+        uint64_t getCaps() const {return 0;}
+        SwapChainGL* createSwapChain(void* _nwh){return 0;}
+        void destroySwapChain(SwapChainGL*  _swapChain){}
+        void swap(SwapChainGL* _swapChain = nullptr){}
+        void makeCurrent(SwapChainGL* _swapChain = nullptr){}
+        void import(){}
+        bool isValid() const{return false;}
+    };
+}
+}
 
 #endif // BGFX_USE_EGL
 
