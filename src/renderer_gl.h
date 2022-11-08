@@ -37,7 +37,7 @@
 
 //almost all linux desktop can run with egl
 #if(BGFX_USE_GLX)
-#undef BGFX_USE_EGL
+#undef  BGFX_USE_EGL
 #define BGFX_USE_EGL 1
 #include "glcontext_egl.h"
 #endif
@@ -1539,7 +1539,7 @@ namespace bgfx { namespace gl
 		void resolve();
 		void discard(uint16_t _flags);
 
-		SwapChainGL* m_swapChain;
+        SwapChainGL* m_swapChain;
 		GLuint m_fbo[2];
 		uint32_t m_width;
 		uint32_t m_height;
@@ -1675,10 +1675,15 @@ namespace bgfx { namespace gl
 				}
 
 				GLint available;
-				GL_CHECK(glGetQueryObjectiv(query.m_end
-					, GL_QUERY_RESULT_AVAILABLE
-					, &available
-					) );
+//XUWEI-FIX TODO
+//				GL_CHECK(glGetQueryObjectiv(query.m_end
+//					, GL_QUERY_RESULT_AVAILABLE
+//					, &available
+//					) );
+                glGetQueryObjectiv(query.m_end
+                                    , GL_QUERY_RESULT_AVAILABLE
+                                    , &available
+                                    );
 
 				if (available)
 				{

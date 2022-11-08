@@ -12,8 +12,6 @@
 #	include "emscripten.h"
 #   include <stdio.h>
 
-bool  g_gles_rt     = false;
-float g_gl_version  = 0;
 namespace bgfx { namespace gl
 {
 	static char s_viewName[BGFX_CONFIG_MAX_VIEWS][BGFX_CONFIG_MAX_VIEW_NAME];
@@ -2215,6 +2213,102 @@ namespace bgfx { namespace gl
 		bool m_detachShader;
 	};
 
+
+    //when use EGL directly, define the GlContex type back
+#if !BGFX_USE_GLX && BGFX_USE_EGL
+    typedef EglContext GlContex;
+#endif
+
+#if BGFX_USE_GLX
+    class GlContextHolder{
+    public:
+        GlContextHolder(){
+            if(getenv("BGFX_RUNTIME_REQUEST_EGL")){
+                m_eglRequest = true;
+            }
+        }
+        void create(uint32_t _width, uint32_t _height, uint32_t _flags){
+            if(m_eglRequest){
+                m_eglContext.create(_width,_height,_flags);
+                m_msaaContext = m_eglContext.m_msaaContext;
+            }
+            else{
+                m_glxContext.create(_width,_height,_flags);
+                m_msaaContext = m_glxContext.m_msaaContext;
+            }
+        }
+        void destroy(){
+            if(m_eglRequest)
+                m_eglContext.destroy();
+            else
+                m_glxContext.destroy();
+        }
+        void resize(uint32_t _width, uint32_t _height, uint32_t _flags){
+            if(m_eglRequest)
+                m_eglContext.resize(_width,_height,_flags);
+            else
+                m_glxContext.resize(_width,_height,_flags);
+        }
+        uint64_t getCaps() const{
+            if(m_eglRequest)
+                return m_eglContext.getCaps();
+            else
+                return m_glxContext.getCaps();
+        }
+        SwapChainGL* createSwapChain(void* _nwh){
+            if(m_eglRequest)
+                return m_eglContext.createSwapChain(_nwh);
+            else
+                return m_glxContext.createSwapChain(_nwh);
+        }
+
+        void destroySwapChain(SwapChainGL*  _swapChain){
+            if(m_eglRequest)
+                m_eglContext.destroySwapChain(_swapChain);
+            else
+                m_glxContext.destroySwapChain(_swapChain);
+        }
+        void swap(SwapChainGL* _swapChain = nullptr){
+            if(m_eglRequest)
+                m_eglContext.swap(_swapChain);
+            else
+                m_glxContext.swap(_swapChain);
+        }
+        void makeCurrent(SwapChainGL* _swapChain = nullptr){
+            if(m_eglRequest)
+                m_eglContext.makeCurrent(_swapChain);
+            else
+                m_glxContext.makeCurrent(_swapChain);
+        }
+        void import(){
+            if(m_eglRequest){
+                //also import glx functions
+                m_eglContext.import();
+                m_glxContext.import();
+            }
+            else{
+                m_glxContext.import();
+                m_eglContext.import();
+            }
+        }
+        bool isValid() const{
+            if(m_eglRequest)
+                return m_eglContext.isValid();
+            else
+                return m_glxContext.isValid();
+        }
+    public:
+        bool m_msaaContext;
+    private:
+        GlContext m_glxContext;
+        EglContext m_eglContext;
+        bool m_eglRequest;
+    };
+#endif
+
+    bool  g_gles_rt = false;
+    float g_gl_version = 0;
+
 	struct RendererContextGL : public RendererContextI
 	{
 		RendererContextGL()
@@ -2248,21 +2342,13 @@ namespace bgfx { namespace gl
 			, m_msaaBlitProgram(0)
 			, m_clearQuadColor(BGFX_INVALID_HANDLE)
 			, m_clearQuadDepth(BGFX_INVALID_HANDLE)
-            , m_glctx_egl_(NULL)
 		{
-#ifdef BGFX_USE_EGL
-            if(getenv("BGFX_RUNTIME_REQUEST_EGL")){
-                m_glctx_egl_ = new EglContext();
-            }
-#endif
 			bx::memSet(m_msaaBackBufferRbos, 0, sizeof(m_msaaBackBufferRbos) );
 		}
 
 		~RendererContextGL()
         {
-            if(m_glctx_egl_ != nullptr){
-                delete m_glctx_egl_;
-            }
+
 		}
 
 		bool init(const Init& _init)
@@ -2331,6 +2417,7 @@ namespace bgfx { namespace gl
                     g_gles_rt = strstr(m_version,"OpenGL ES");
                     g_gl_version = stof(m_version);
                     m_gles3 = (g_gl_version >= 3.0 && g_gles_rt);
+                    m_readBackSupported = m_srgbWriteControlSupport = m_borderColorSupport = !g_gles_rt;
                     fprintf(stderr,"bgfx running on OpenGL %s version:%f\n",g_gles_rt?"ES":"Core",g_gl_version);
 				}
 			}
@@ -2470,7 +2557,7 @@ namespace bgfx { namespace gl
 				}
 			}
 
-			if (BX_ENABLED(BGFX_CONFIG_RENDERER_OPENGL)
+            if (!g_gles_rt
 			&&  !s_extension[Extension::ARB_framebuffer_object].m_supported)
 			{
 				BX_TRACE("Init error: ARB_framebuffer_object not supported.");
@@ -2647,7 +2734,7 @@ namespace bgfx { namespace gl
 					setTextureFormatSrgb(TextureFormat::R5G6B5, GL_ZERO,  GL_BGR);
 				}
 
-				if (BX_ENABLED(BGFX_CONFIG_RENDERER_OPENGL)
+                if (!g_gles_rt
 				||  m_gles3)
 				{
 					setTextureFormat(TextureFormat::R8I,     GL_R8I,      GL_RED_INTEGER,  GL_BYTE);
@@ -2666,7 +2753,7 @@ namespace bgfx { namespace gl
 				||  s_extension[Extension::IMG_texture_format_BGRA8888  ].m_supported
 				||  s_extension[Extension::APPLE_texture_format_BGRA8888].m_supported)
 				{
-					if (BX_ENABLED(BGFX_CONFIG_RENDERER_OPENGL) )
+                    if (!g_gles_rt )
 					{
 						m_readPixelsFmt = GL_BGRA;
 					}
@@ -2820,17 +2907,17 @@ namespace bgfx { namespace gl
 					g_caps.formats[ii] = supported;
 				}
 
-				g_caps.supported |= !!(BGFX_CONFIG_RENDERER_OPENGL || m_gles3)
+                g_caps.supported |= !!(!g_gles_rt || m_gles3)
 					|| s_extension[Extension::OES_texture_3D].m_supported
 					? BGFX_CAPS_TEXTURE_3D
 					: 0
 					;
-				g_caps.supported |= !!(BGFX_CONFIG_RENDERER_OPENGL || m_gles3)
+                g_caps.supported |= !!(!g_gles_rt || m_gles3)
 					|| s_extension[Extension::EXT_shadow_samplers].m_supported
 					? BGFX_CAPS_TEXTURE_COMPARE_ALL
 					: 0
 					;
-				g_caps.supported |= !!(BGFX_CONFIG_RENDERER_OPENGL || m_gles3)
+                g_caps.supported |= !!(!g_gles_rt || m_gles3)
 					|| s_extension[Extension::OES_vertex_half_float].m_supported
 					? BGFX_CAPS_VERTEX_ATTRIB_HALF
 					: 0
@@ -2841,7 +2928,7 @@ namespace bgfx { namespace gl
 					? BGFX_CAPS_VERTEX_ATTRIB_UINT10
 					: 0
 					;
-				g_caps.supported |= !!(BGFX_CONFIG_RENDERER_OPENGL || m_gles3)
+                g_caps.supported |= !!(!g_gles_rt || m_gles3)
 					|| s_extension[Extension::EXT_frag_depth].m_supported
 					? BGFX_CAPS_FRAGMENT_DEPTH
 					: 0
@@ -2854,7 +2941,7 @@ namespace bgfx { namespace gl
 					? BGFX_CAPS_FRAGMENT_ORDERING
 					: 0
 					;
-				g_caps.supported |= !!(BGFX_CONFIG_RENDERER_OPENGL || m_gles3)
+                g_caps.supported |= !!(!g_gles_rt || m_gles3)
 					|| s_extension[Extension::OES_element_index_uint].m_supported
 					? BGFX_CAPS_INDEX32
 					: 0
@@ -2906,7 +2993,7 @@ namespace bgfx { namespace gl
 					: 0
 					;
 
-				g_caps.supported |= (m_readBackSupported || BX_ENABLED(BGFX_GL_CONFIG_TEXTURE_READ_BACK_EMULATION) )
+                g_caps.supported |= (m_readBackSupported || g_gles_rt )
 					? BGFX_CAPS_TEXTURE_READ_BACK
 					: 0
 					;
@@ -2934,11 +3021,11 @@ namespace bgfx { namespace gl
 					;
 
 				g_caps.limits.maxTextureSize     = uint16_t(glGet(GL_MAX_TEXTURE_SIZE) );
-                g_caps.limits.maxTextureLayers   = BX_ENABLED(BGFX_CONFIG_RENDERER_OPENGL >= 30) || (g_gles_rt&&g_gl_version>=30) || s_extension[Extension::EXT_texture_array].m_supported ? uint16_t(bx::max(glGet(GL_MAX_ARRAY_TEXTURE_LAYERS), 1) ) : 1;
+                g_caps.limits.maxTextureLayers   = (!g_gles_rt && g_gl_version>3.0) || (g_gles_rt&&g_gl_version>=30) || s_extension[Extension::EXT_texture_array].m_supported ? uint16_t(bx::max(glGet(GL_MAX_ARRAY_TEXTURE_LAYERS), 1) ) : 1;
 				g_caps.limits.maxComputeBindings = computeSupport ? BGFX_MAX_COMPUTE_BINDINGS : 0;
 				g_caps.limits.maxVertexStreams   = BGFX_CONFIG_MAX_VERTEX_STREAMS;
 
-				if (BX_ENABLED(BGFX_CONFIG_RENDERER_OPENGL)
+                if (!g_gles_rt
 				||  m_gles3
 				||  s_extension[Extension::EXT_draw_buffers  ].m_supported
 				||  s_extension[Extension::WEBGL_draw_buffers].m_supported)
@@ -2977,7 +3064,7 @@ namespace bgfx { namespace gl
 					|| s_extension[Extension::ARB_sampler_objects].m_supported
 					;
 
-				m_shadowSamplersSupport = !!(BGFX_CONFIG_RENDERER_OPENGL || m_gles3)
+                m_shadowSamplersSupport = !!(!g_gles_rt || m_gles3)
 					|| s_extension[Extension::EXT_shadow_samplers].m_supported
 					;
 
@@ -2993,7 +3080,7 @@ namespace bgfx { namespace gl
 					|| s_extension[Extension::EXT_texture_swizzle].m_supported
 					;
 
-				m_depthTextureSupport = !!(BGFX_CONFIG_RENDERER_OPENGL || m_gles3)
+                m_depthTextureSupport = !!(!g_gles_rt || m_gles3)
 					|| s_extension[Extension::ANGLE_depth_texture       ].m_supported
 					|| s_extension[Extension::CHROMIUM_depth_texture    ].m_supported
 					|| s_extension[Extension::GOOGLE_depth_texture      ].m_supported
@@ -3046,9 +3133,7 @@ namespace bgfx { namespace gl
 					| (computeSupport              ? BGFX_CAPS_COMPUTE                : 0)
 					| (m_imageLoadStoreSupport     ? BGFX_CAPS_IMAGE_RW               : 0)
 					;
-                if(m_glctx_egl_ != nullptr)
-                    g_caps.supported |= m_glctx_egl_->getCaps();
-                else
+
                     g_caps.supported |= m_glctx.getCaps();
 
                 if (g_gles_rt )
@@ -3177,7 +3262,7 @@ namespace bgfx { namespace gl
 					glInsertEventMarker = stubInsertEventMarker;
 				}
 
-                m_maxLabelLen = (g_gles_rt&&g_gl_version>=32) || BX_ENABLED(BGFX_CONFIG_RENDERER_OPENGL >= 43) || s_extension[Extension::KHR_debug].m_supported ? uint16_t(glGet(GL_MAX_LABEL_LENGTH) ) : 0;
+                m_maxLabelLen = (g_gles_rt&&g_gl_version>=3.2) || (!g_gles_rt&&g_gl_version>=4.3) || s_extension[Extension::KHR_debug].m_supported ? uint16_t(glGet(GL_MAX_LABEL_LENGTH) ) : 0;
 
 				setGraphicsDebuggerPresent(s_extension[Extension::EXT_debug_tool].m_supported);
 
@@ -3224,7 +3309,7 @@ namespace bgfx { namespace gl
 				break;
 			}
 
-            if(m_glctx_egl_)m_glctx_egl_->destroy(); else m_glctx.destroy();
+            m_glctx.destroy();
 
 			unloadRenderDoc(m_renderdocdll);
 			return false;
@@ -3255,7 +3340,7 @@ namespace bgfx { namespace gl
 
 			destroyMsaaFbo();
 
-            if(m_glctx_egl_)m_glctx_egl_->destroy(); else m_glctx.destroy();
+            m_glctx.destroy();
 
 			m_flip = false;
 
@@ -3264,7 +3349,7 @@ namespace bgfx { namespace gl
 
 		RendererType::Enum getRendererType() const override
 		{
-			if (BX_ENABLED(BGFX_CONFIG_RENDERER_OPENGL) )
+            if (!g_gles_rt )
 			{
 				return RendererType::OpenGL;
 			}
@@ -3291,7 +3376,7 @@ namespace bgfx { namespace gl
 					FrameBufferGL& frameBuffer = m_frameBuffers[m_windows[ii].idx];
 					if (frameBuffer.m_needPresent)
                     {
-                        if(m_glctx_egl_)m_glctx_egl_->swap(frameBuffer.m_swapChain); else m_glctx.swap(frameBuffer.m_swapChain);
+                        m_glctx.swap(frameBuffer.m_swapChain);
 						frameBuffer.m_needPresent = false;
 					}
 				}
@@ -3300,7 +3385,7 @@ namespace bgfx { namespace gl
 				{
 					// Ensure the back buffer is bound as the source of the flip
 					GL_CHECK(glBindFramebuffer(GL_FRAMEBUFFER, m_backBufferFbo) );
-                    if(m_glctx_egl_)m_glctx_egl_->swap();else m_glctx.swap();
+                    m_glctx.swap();
 					m_needPresent = false;
 				}
 			}
@@ -3436,7 +3521,7 @@ namespace bgfx { namespace gl
 
 				GL_CHECK(glBindTexture(texture.m_target, 0) );
 			}
-			else if (BX_ENABLED(BGFX_GL_CONFIG_TEXTURE_READ_BACK_EMULATION) )
+            else if (g_gles_rt )
 			{
 				const TextureGL& texture = m_textures[_handle.idx];
 				const bool compressed    = bimg::isCompressed(bimg::TextureFormat::Enum(texture.m_textureFormat) );
@@ -3457,7 +3542,7 @@ namespace bgfx { namespace gl
 						, at[0].mip
 						) );
 
-					if (BX_ENABLED(BGFX_CONFIG_RENDERER_OPENGL) || m_gles3)
+                    if (!g_gles_rt || m_gles3)
 					{
 						GL_CHECK(glReadBuffer(GL_COLOR_ATTACHMENT0) );
 					}
@@ -3577,7 +3662,7 @@ namespace bgfx { namespace gl
 
 		void requestScreenShot(FrameBufferHandle _handle, const char* _filePath) override
 		{
-			SwapChainGL* swapChain = NULL;
+            SwapChainGL* swapChain = NULL;
 			uint32_t width  = m_resolution.width;
 			uint32_t height = m_resolution.height;
 
@@ -3589,7 +3674,7 @@ namespace bgfx { namespace gl
 				height = frameBuffer.m_height;
 			}
 
-            if(m_glctx_egl_)m_glctx_egl_->makeCurrent(swapChain); else m_glctx.makeCurrent(swapChain);
+            m_glctx.makeCurrent(swapChain);
 
 			uint32_t length = width*height*4;
 			uint8_t* data = (uint8_t*)BX_ALLOC(g_allocator, length);
@@ -3842,7 +3927,7 @@ namespace bgfx { namespace gl
 				}
 			}
 
-            if(m_glctx_egl_)m_glctx_egl_->makeCurrent();else m_glctx.makeCurrent(NULL);
+            m_glctx.makeCurrent(NULL);
 
 			if (!isValid(_fbh) )
 			{
@@ -3868,7 +3953,7 @@ namespace bgfx { namespace gl
 				_height = frameBuffer.m_height;
 				if (UINT16_MAX != frameBuffer.m_denseIdx)
 				{
-                    if(m_glctx_egl_)m_glctx_egl_->makeCurrent(frameBuffer.m_swapChain);else m_glctx.makeCurrent(frameBuffer.m_swapChain);
+                    m_glctx.makeCurrent(frameBuffer.m_swapChain);
 					GL_CHECK(glFrontFace(GL_CW) );
 
 					frameBuffer.m_needPresent = true;
@@ -3876,7 +3961,7 @@ namespace bgfx { namespace gl
 				}
 				else
 				{
-                    if(m_glctx_egl_)m_glctx_egl_->makeCurrent(NULL);else m_glctx.makeCurrent(NULL);
+                    m_glctx.makeCurrent(NULL);
 					m_currentFbo = frameBuffer.m_fbo[0];
 				}
 			}
@@ -3903,19 +3988,16 @@ namespace bgfx { namespace gl
 
 		void createMsaaFbo(uint32_t _width, uint32_t _height, uint32_t _msaa)
 		{
-            bool msaa = m_glctx.m_msaaContext;
-            if(m_glctx_egl_) msaa = m_glctx_egl_->m_msaaContext;
-
 			if (0 == m_msaaBackBufferFbo // iOS
 			&&  1 < _msaa
-            && !msaa)
+            && !m_glctx.m_msaaContext)
 			{
 				GLenum storageFormat = m_resolution.reset & BGFX_RESET_SRGB_BACKBUFFER
 					? GL_SRGB8_ALPHA8
 					: GL_RGBA8
 					;
 
-				GLenum attachment = BX_ENABLED(BGFX_CONFIG_RENDERER_OPENGL) || m_gles3
+                GLenum attachment = !g_gles_rt || m_gles3
 					? GL_DEPTH_STENCIL_ATTACHMENT
 					: GL_DEPTH_ATTACHMENT
 					;
@@ -4127,7 +4209,7 @@ namespace bgfx { namespace gl
 
 				const uint32_t width  = m_resolution.width;
 				const uint32_t height = m_resolution.height;
-				const GLenum filter = BX_ENABLED(BGFX_CONFIG_RENDERER_OPENGL) || !m_gles3
+                const GLenum filter = !g_gles_rt || !m_gles3
 					? GL_NEAREST
 					: GL_LINEAR
 					;
@@ -4164,14 +4246,10 @@ namespace bgfx { namespace gl
 			if (_width  != 0
 			||  _height != 0)
 			{
-                bool valid = m_glctx.isValid();
-                if(m_glctx_egl_)
-                    valid=m_glctx_egl_->isValid();
-
-                if (!valid )
+                if (!m_glctx.isValid() )
 				{
-                    if(m_glctx_egl_)m_glctx_egl_->create(_width, _height, _flags);else m_glctx.create(_width, _height, _flags);
-
+                    m_glctx.create(_width, _height, _flags);
+                    m_glctx.import();
 #if BX_PLATFORM_IOS
 					// iOS: need to figure out how to deal with FBO created by context.
 					m_backBufferFbo = m_msaaBackBufferFbo = m_glctx.getFbo();
@@ -4181,7 +4259,7 @@ namespace bgfx { namespace gl
 				{
 					destroyMsaaFbo();
 
-                    if(m_glctx_egl_)m_glctx_egl_->resize(_width, _height, _flags);else m_glctx.resize(_width, _height, _flags);
+                    m_glctx.resize(_width, _height, _flags);
 
 					uint32_t msaa = (_flags&BGFX_RESET_MSAA_MASK)>>BGFX_RESET_MSAA_SHIFT;
 					msaa = bx::uint32_min(m_maxMsaa, msaa == 0 ? 0 : 1<<msaa);
@@ -4267,7 +4345,7 @@ namespace bgfx { namespace gl
 					GL_CHECK(glSamplerParameteri(sampler, GL_TEXTURE_MAG_FILTER, magFilter) );
 					GL_CHECK(glSamplerParameteri(sampler, GL_TEXTURE_MIN_FILTER, minFilter) );
 
-					if (BX_ENABLED(BGFX_CONFIG_RENDERER_OPENGL) )
+                    if (!g_gles_rt )
 					{
 						GL_CHECK(glSamplerParameterf(sampler, GL_TEXTURE_LOD_BIAS, float(BGFX_CONFIG_MIP_LOD_BIAS) ) );
 					}
@@ -4396,9 +4474,8 @@ namespace bgfx { namespace gl
 					BX_FREE(g_allocator, data);
 				}
 
-#if BGFX_CONFIG_RENDERER_OPENGL
-				GL_CHECK(glProgramParameteri(programId, GL_PROGRAM_BINARY_RETRIEVABLE_HINT, GL_TRUE) );
-#endif // BGFX_CONFIG_RENDERER_OPENGL
+                if(!g_gles_rt)
+                    GL_CHECK(glProgramParameteri(programId, GL_PROGRAM_BINARY_RETRIEVABLE_HINT, GL_TRUE) );
 			}
 
 			return cached;
@@ -4833,8 +4910,11 @@ namespace bgfx { namespace gl
 			GLuint m_msaaBackBufferTextures[2];
 		};
 		GLuint m_msaaBlitProgram;
-        EglContext* m_glctx_egl_;
-		GlContext m_glctx;
+#if BGFX_USE_GLX
+        GlContextHolder m_glctx;
+#else
+        GlContext m_glctx
+#endif
 		bool m_needPresent;
 
 		UniformHandle m_clearQuadColor;
@@ -4844,7 +4924,7 @@ namespace bgfx { namespace gl
 		const char* m_renderer;
 		const char* m_version;
 		const char* m_glslVersion;
-		bool m_gles3;        
+        bool m_gles3;
 
 		Workaround m_workaround;
 
@@ -5131,9 +5211,8 @@ namespace bgfx { namespace gl
 		GLint activeUniforms = 0;
 		GLint activeBuffers  = 0;
 
-#if BGFX_CONFIG_RENDERER_OPENGL >= 31
-		GL_CHECK(glBindFragDataLocation(m_id, 0, "bgfx_FragColor") );
-#endif // BGFX_CONFIG_RENDERER_OPENGL >= 31
+        if(!g_gles_rt && g_gl_version > 3.1 && glBindFragDataLocation)
+            GL_CHECK(glBindFragDataLocation(m_id, 0, "bgfx_FragColor") );
 
 		GLint max0, max1;
 
@@ -5458,7 +5537,7 @@ namespace bgfx { namespace gl
 					GL_CHECK(glVertexAttribDivisor(loc, 0) );
 
 					uint32_t baseVertex = _baseVertex*_layout.m_stride + _layout.m_offset[attr];
-					if ( (BX_ENABLED(BGFX_CONFIG_RENDERER_OPENGL >= 30) || s_renderGL->m_gles3)
+                    if ( ((!g_gles_rt && g_gl_version>3.0) || s_renderGL->m_gles3)
 					&&  !isFloat(type)
 					&&  !normalized)
 					{
@@ -5643,7 +5722,7 @@ namespace bgfx { namespace gl
 
 			setSamplerState(uint32_t(_flags), NULL);
 
-			if (BX_ENABLED(BGFX_CONFIG_RENDERER_OPENGL)
+            if (!g_gles_rt
 			&&  TextureFormat::BGRA8 == m_requestedFormat
 			&&  !s_textureFormat[m_requestedFormat].m_supported
 			&&  s_renderGL->m_textureSwizzleSupport)
@@ -5676,7 +5755,7 @@ namespace bgfx { namespace gl
 						, _height
 						) );
 				}
-				else if (BX_ENABLED(BGFX_CONFIG_RENDERER_OPENGL) || s_renderGL->m_gles3)
+                else if (!g_gles_rt || s_renderGL->m_gles3)
 				{
 					GL_CHECK(glRenderbufferStorageMultisample(GL_RENDERBUFFER
 						, msaaQuality
@@ -6000,7 +6079,7 @@ namespace bgfx { namespace gl
 			&& !s_textureFormat[m_requestedFormat].m_supported
 			&& !s_renderGL->m_textureSwizzleSupport
 			;
-		const bool unpackRowLength = !!BGFX_CONFIG_RENDERER_OPENGL || s_extension[Extension::EXT_unpack_subimage].m_supported;
+        const bool unpackRowLength = !g_gles_rt || s_extension[Extension::EXT_unpack_subimage].m_supported;
 		const bool compressed      = bimg::isCompressed(bimg::TextureFormat::Enum(m_requestedFormat) );
 		const bool convert         = false
 			|| (compressed && m_textureFormat != m_requestedFormat)
@@ -6146,7 +6225,7 @@ namespace bgfx { namespace gl
 			GL_CHECK(glTexParameteri(target, GL_TEXTURE_WRAP_S, s_textureAddress[(flags&BGFX_SAMPLER_U_MASK)>>BGFX_SAMPLER_U_SHIFT]) );
 			GL_CHECK(glTexParameteri(target, GL_TEXTURE_WRAP_T, s_textureAddress[(flags&BGFX_SAMPLER_V_MASK)>>BGFX_SAMPLER_V_SHIFT]) );
 
-			if (BX_ENABLED(BGFX_CONFIG_RENDERER_OPENGL) || s_renderGL->m_gles3
+            if (!g_gles_rt || s_renderGL->m_gles3
 			||  s_extension[Extension::APPLE_texture_max_level].m_supported)
 			{
 				GL_CHECK(glTexParameteri(targetMsaa, GL_TEXTURE_MAX_LEVEL, numMips-1) );
@@ -6163,7 +6242,7 @@ namespace bgfx { namespace gl
 			GL_CHECK(glTexParameteri(target, GL_TEXTURE_MAG_FILTER, magFilter) );
 			GL_CHECK(glTexParameteri(target, GL_TEXTURE_MIN_FILTER, minFilter) );
 
-			if (BX_ENABLED(BGFX_CONFIG_RENDERER_OPENGL) )
+            if (!g_gles_rt)
 			{
 				GL_CHECK(glTexParameterf(target, GL_TEXTURE_LOD_BIAS, float(BGFX_CONFIG_MIP_LOD_BIAS) ) );
 			}
@@ -6520,8 +6599,7 @@ namespace bgfx { namespace gl
 						bx::memCopy(insert + 2, "fx", 2);
 					}
 				}
-				else if (BX_ENABLED(BGFX_CONFIG_RENDERER_OPENGL)
-					 &&  BX_ENABLED(BGFX_CONFIG_RENDERER_OPENGL <= 21) )
+                else if (!g_gles_rt && g_gl_version <2.1 )
 				{
 					const bool usesTextureLod = true
 						&& s_extension[Extension::ARB_shader_texture_lod].m_supported
@@ -6743,7 +6821,7 @@ namespace bgfx { namespace gl
 
 					bx::write(&writer, '\0', &err);
 				}
-				else if (BX_ENABLED(BGFX_CONFIG_RENDERER_OPENGL   >= 31)
+                else if ((!g_gles_rt && g_gl_version>=3.0)
 					 ||  s_renderGL->m_gles3)
 				{
 					if (s_renderGL->m_gles3)
@@ -6779,7 +6857,7 @@ namespace bgfx { namespace gl
 							, &err
 							);
 
-						if (BX_ENABLED(BGFX_CONFIG_RENDERER_OPENGL) )
+                        if (!g_gles_rt)
 						{
 							bx::write(&writer
 								, "#define shadow2D(_sampler, _coord) vec2(textureProj(_sampler, vec4(_coord, 1.0) ) )\n"
@@ -7025,7 +7103,7 @@ namespace bgfx { namespace gl
 
 					if (0 != texture.m_rbo)
 					{
-						if (!(BX_ENABLED(BGFX_CONFIG_RENDERER_OPENGL >= 30) || s_renderGL->m_gles3)
+                        if (!((!g_gles_rt && g_gl_version>=3.0) || s_renderGL->m_gles3)
 							&& GL_DEPTH_STENCIL_ATTACHMENT == attachment)
 						{
 							GL_CHECK(glFramebufferRenderbuffer(GL_FRAMEBUFFER
@@ -7095,7 +7173,7 @@ namespace bgfx { namespace gl
 
 			m_num = uint8_t(colorIdx);
 
-			if (0 == colorIdx && BX_ENABLED(BGFX_CONFIG_RENDERER_OPENGL) )
+            if (0 == colorIdx && !g_gles_rt)
 			{
 				// When only depth is attached disable draw buffer to avoid
 				// GL_FRAMEBUFFER_INCOMPLETE_DRAW_BUFFER.
@@ -7106,7 +7184,7 @@ namespace bgfx { namespace gl
 				GL_CHECK(glDrawBuffers(colorIdx, buffers) );
 			}
 
-			if (BX_ENABLED(BGFX_CONFIG_RENDERER_OPENGL) || s_renderGL->m_gles3)
+            if (!g_gles_rt|| s_renderGL->m_gles3)
 			{
 				// Disable read buffer to avoid GL_FRAMEBUFFER_INCOMPLETE_READ_BUFFER.
 				GL_CHECK(glReadBuffer(GL_NONE) );
@@ -7178,10 +7256,7 @@ namespace bgfx { namespace gl
 	void FrameBufferGL::create(uint16_t _denseIdx, void* _nwh, uint32_t _width, uint32_t _height, TextureFormat::Enum _format, TextureFormat::Enum _depthFormat)
 	{
 		BX_UNUSED(_format, _depthFormat);
-        if(s_renderGL->m_glctx_egl_)
-            m_swapChain = s_renderGL->m_glctx_egl_->createSwapChain(_nwh);
-        else
-            m_swapChain = s_renderGL->m_glctx.createSwapChain(_nwh);
+        m_swapChain = s_renderGL->m_glctx.createSwapChain(_nwh);
 		m_width     = _width;
 		m_height    = _height;
 		m_numTh     = 0;
@@ -7199,10 +7274,7 @@ namespace bgfx { namespace gl
 
 		if (NULL != m_swapChain)
 		{
-            if(s_renderGL->m_glctx_egl_)
-                s_renderGL->m_glctx_egl_->destroySwapChain(m_swapChain);
-            else
-                s_renderGL->m_glctx.destroySwapChain(m_swapChain);
+            s_renderGL->m_glctx.destroySwapChain(m_swapChain);
 			m_swapChain = NULL;
 		}
 
@@ -7279,7 +7351,7 @@ namespace bgfx { namespace gl
 
 			GL_CHECK(glBindFramebuffer(GL_READ_FRAMEBUFFER, m_fbo[0]) );
 
-			if (BX_ENABLED(BGFX_CONFIG_RENDERER_OPENGL) || s_renderGL->m_gles3)
+            if (!g_gles_rt || s_renderGL->m_gles3)
 			{
 				GL_CHECK(glReadBuffer(GL_NONE) );
 			}
@@ -7498,9 +7570,9 @@ namespace bgfx { namespace gl
 			renderDocTriggerCapture();
 		}
 
-        if(m_glctx_egl_)m_glctx_egl_->makeCurrent(NULL);else m_glctx.makeCurrent(NULL);
+        m_glctx.makeCurrent(NULL);
 
-		BGFX_GL_PROFILER_BEGIN_LITERAL("rendererSubmit", kColorView);
+        BGFX_GL_PROFILER_BEGIN_LITERAL("rendererSubmit", kColorView);
 
 		if (1 < m_numWindows
 		&&  m_vaoSupport)
@@ -7592,7 +7664,7 @@ namespace bgfx { namespace gl
 
 		const bool blendIndependentSupported = s_extension[Extension::ARB_draw_buffers_blend].m_supported;
 		const bool computeSupported = false
-			|| (BX_ENABLED(BGFX_CONFIG_RENDERER_OPENGL) && s_extension[Extension::ARB_compute_shader].m_supported)
+            || (!g_gles_rt && s_extension[Extension::ARB_compute_shader].m_supported)
             || (g_gles_rt && g_gl_version>=3.1)
 			;
 		const uint32_t maxComputeBindings = g_caps.limits.maxComputeBindings;
@@ -8023,7 +8095,7 @@ namespace bgfx { namespace gl
 						viewState.m_alphaRef = ref/255.0f;
 					}
 
-					if (BX_ENABLED(BGFX_CONFIG_RENDERER_OPENGL) )
+                    if (!g_gles_rt )
 					{
 						if ( (BGFX_STATE_PT_POINTS|BGFX_STATE_POINT_SIZE_MASK) & changedFlags)
 						{
@@ -8110,7 +8182,7 @@ namespace bgfx { namespace gl
 
 							const uint32_t numRt = getNumRt();
 
-							if (!BX_ENABLED(BGFX_CONFIG_RENDERER_OPENGL)
+                            if (!(!g_gles_rt)
 							||  1 >= numRt
 							||  !independent)
 							{
@@ -8625,7 +8697,7 @@ namespace bgfx { namespace gl
 
 		BGFX_GL_PROFILER_END();
 
-        if(m_glctx_egl_)m_glctx_egl_->makeCurrent(NULL);else m_glctx.makeCurrent(NULL);
+        m_glctx.makeCurrent(NULL);
 		int64_t timeEnd = bx::getHPCounter();
 		int64_t frameTime = timeEnd - timeBegin;
 
@@ -8762,77 +8834,78 @@ namespace bgfx { namespace gl
 					, m_samplerStateCache.getCount()
 					);
 
-#if BGFX_CONFIG_RENDERER_OPENGL
-				if (s_extension[Extension::ATI_meminfo].m_supported)
-				{
-					GLint vboFree[4];
-					GL_CHECK(glGetIntegerv(GL_VBO_FREE_MEMORY_ATI, vboFree) );
+                if(!g_gles_rt)
+                {
+                    if (s_extension[Extension::ATI_meminfo].m_supported)
+                    {
+                        GLint vboFree[4];
+                        GL_CHECK(glGetIntegerv(GL_VBO_FREE_MEMORY_ATI, vboFree) );
 
-					GLint texFree[4];
-					GL_CHECK(glGetIntegerv(GL_TEXTURE_FREE_MEMORY_ATI, texFree) );
+                        GLint texFree[4];
+                        GL_CHECK(glGetIntegerv(GL_TEXTURE_FREE_MEMORY_ATI, texFree) );
 
-					GLint rbfFree[4];
-					GL_CHECK(glGetIntegerv(GL_RENDERBUFFER_FREE_MEMORY_ATI, rbfFree) );
+                        GLint rbfFree[4];
+                        GL_CHECK(glGetIntegerv(GL_RENDERBUFFER_FREE_MEMORY_ATI, rbfFree) );
 
-					pos++;
-					tvm.printf(10, pos++, 0x8c, " -------------|    free|  free b|     aux|  aux fb ");
+                        pos++;
+                        tvm.printf(10, pos++, 0x8c, " -------------|    free|  free b|     aux|  aux fb ");
 
-					char tmp0[16];
-					char tmp1[16];
-					char tmp2[16];
-					char tmp3[16];
+                        char tmp0[16];
+                        char tmp1[16];
+                        char tmp2[16];
+                        char tmp3[16];
 
-					bx::prettify(tmp0, BX_COUNTOF(tmp0), vboFree[0]);
-					bx::prettify(tmp1, BX_COUNTOF(tmp1), vboFree[1]);
-					bx::prettify(tmp2, BX_COUNTOF(tmp2), vboFree[2]);
-					bx::prettify(tmp3, BX_COUNTOF(tmp3), vboFree[3]);
-					tvm.printf(10, pos++, 0x8b, "           VBO: %10s, %10s, %10s, %10s ", tmp0, tmp1, tmp2, tmp3);
+                        bx::prettify(tmp0, BX_COUNTOF(tmp0), vboFree[0]);
+                        bx::prettify(tmp1, BX_COUNTOF(tmp1), vboFree[1]);
+                        bx::prettify(tmp2, BX_COUNTOF(tmp2), vboFree[2]);
+                        bx::prettify(tmp3, BX_COUNTOF(tmp3), vboFree[3]);
+                        tvm.printf(10, pos++, 0x8b, "           VBO: %10s, %10s, %10s, %10s ", tmp0, tmp1, tmp2, tmp3);
 
-					bx::prettify(tmp0, BX_COUNTOF(tmp0), texFree[0]);
-					bx::prettify(tmp1, BX_COUNTOF(tmp1), texFree[1]);
-					bx::prettify(tmp2, BX_COUNTOF(tmp2), texFree[2]);
-					bx::prettify(tmp3, BX_COUNTOF(tmp3), texFree[3]);
-					tvm.printf(10, pos++, 0x8b, "       Texture: %10s, %10s, %10s, %10s ", tmp0, tmp1, tmp2, tmp3);
+                        bx::prettify(tmp0, BX_COUNTOF(tmp0), texFree[0]);
+                        bx::prettify(tmp1, BX_COUNTOF(tmp1), texFree[1]);
+                        bx::prettify(tmp2, BX_COUNTOF(tmp2), texFree[2]);
+                        bx::prettify(tmp3, BX_COUNTOF(tmp3), texFree[3]);
+                        tvm.printf(10, pos++, 0x8b, "       Texture: %10s, %10s, %10s, %10s ", tmp0, tmp1, tmp2, tmp3);
 
-					bx::prettify(tmp0, BX_COUNTOF(tmp0), rbfFree[0]);
-					bx::prettify(tmp1, BX_COUNTOF(tmp1), rbfFree[1]);
-					bx::prettify(tmp2, BX_COUNTOF(tmp2), rbfFree[2]);
-					bx::prettify(tmp3, BX_COUNTOF(tmp3), rbfFree[3]);
-					tvm.printf(10, pos++, 0x8b, " Render Buffer: %10s, %10s, %10s, %10s ", tmp0, tmp1, tmp2, tmp3);
-				}
-				else if (s_extension[Extension::NVX_gpu_memory_info].m_supported)
-				{
-					GLint dedicated;
-					GL_CHECK(glGetIntegerv(GL_GPU_MEMORY_INFO_DEDICATED_VIDMEM_NVX, &dedicated) );
+                        bx::prettify(tmp0, BX_COUNTOF(tmp0), rbfFree[0]);
+                        bx::prettify(tmp1, BX_COUNTOF(tmp1), rbfFree[1]);
+                        bx::prettify(tmp2, BX_COUNTOF(tmp2), rbfFree[2]);
+                        bx::prettify(tmp3, BX_COUNTOF(tmp3), rbfFree[3]);
+                        tvm.printf(10, pos++, 0x8b, " Render Buffer: %10s, %10s, %10s, %10s ", tmp0, tmp1, tmp2, tmp3);
+                    }
+                    else if (s_extension[Extension::NVX_gpu_memory_info].m_supported)
+                    {
+                        GLint dedicated;
+                        GL_CHECK(glGetIntegerv(GL_GPU_MEMORY_INFO_DEDICATED_VIDMEM_NVX, &dedicated) );
 
-					GLint totalAvail;
-					GL_CHECK(glGetIntegerv(GL_GPU_MEMORY_INFO_TOTAL_AVAILABLE_MEMORY_NVX, &totalAvail) );
-					GLint currAvail;
-					GL_CHECK(glGetIntegerv(GL_GPU_MEMORY_INFO_CURRENT_AVAILABLE_VIDMEM_NVX, &currAvail) );
+                        GLint totalAvail;
+                        GL_CHECK(glGetIntegerv(GL_GPU_MEMORY_INFO_TOTAL_AVAILABLE_MEMORY_NVX, &totalAvail) );
+                        GLint currAvail;
+                        GL_CHECK(glGetIntegerv(GL_GPU_MEMORY_INFO_CURRENT_AVAILABLE_VIDMEM_NVX, &currAvail) );
 
-					GLint evictedCount;
-					GL_CHECK(glGetIntegerv(GL_GPU_MEMORY_INFO_EVICTION_COUNT_NVX, &evictedCount) );
+                        GLint evictedCount;
+                        GL_CHECK(glGetIntegerv(GL_GPU_MEMORY_INFO_EVICTION_COUNT_NVX, &evictedCount) );
 
-					GLint evictedMemory;
-					GL_CHECK(glGetIntegerv(GL_GPU_MEMORY_INFO_EVICTED_MEMORY_NVX, &evictedMemory) );
+                        GLint evictedMemory;
+                        GL_CHECK(glGetIntegerv(GL_GPU_MEMORY_INFO_EVICTED_MEMORY_NVX, &evictedMemory) );
 
-					pos++;
+                        pos++;
 
-					char tmp0[16];
-					char tmp1[16];
+                        char tmp0[16];
+                        char tmp1[16];
 
-					bx::prettify(tmp0, BX_COUNTOF(tmp0), dedicated);
-					tvm.printf(10, pos++, 0x8b, " Dedicated: %10s ", tmp0);
+                        bx::prettify(tmp0, BX_COUNTOF(tmp0), dedicated);
+                        tvm.printf(10, pos++, 0x8b, " Dedicated: %10s ", tmp0);
 
-					bx::prettify(tmp0, BX_COUNTOF(tmp0), currAvail);
-					bx::prettify(tmp1, BX_COUNTOF(tmp1), totalAvail);
-					tvm.printf(10, pos++, 0x8b, " Available: %10s / %10s ", tmp0, tmp1);
+                        bx::prettify(tmp0, BX_COUNTOF(tmp0), currAvail);
+                        bx::prettify(tmp1, BX_COUNTOF(tmp1), totalAvail);
+                        tvm.printf(10, pos++, 0x8b, " Available: %10s / %10s ", tmp0, tmp1);
 
-					bx::prettify(tmp0, BX_COUNTOF(tmp0), evictedCount);
-					bx::prettify(tmp1, BX_COUNTOF(tmp1), evictedMemory);
-					tvm.printf(10, pos++, 0x8b, "  Eviction: %10s / %10s ", tmp0, tmp1);
-				}
-#endif // BGFX_CONFIG_RENDERER_OPENGL
+                        bx::prettify(tmp0, BX_COUNTOF(tmp0), evictedCount);
+                        bx::prettify(tmp1, BX_COUNTOF(tmp1), evictedMemory);
+                        tvm.printf(10, pos++, 0x8b, "  Eviction: %10s / %10s ", tmp0, tmp1);
+                    }
+                }
 
 				pos++;
 				double captureMs = double(captureElapsed)*toMs;
