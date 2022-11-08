@@ -226,7 +226,7 @@ namespace bgfx { namespace gl
 
 		import();
 
-		glXMakeCurrent(m_display, (::Window)g_platformData.nwh, m_context);
+        if(g_platformData.nwh) glXMakeCurrent(m_display, (::Window)g_platformData.nwh, m_context);
 		m_current = NULL;
 
 		const char* extensions = glXQueryExtensionsString(m_display, DefaultScreen(m_display) );
@@ -242,7 +242,7 @@ namespace bgfx { namespace gl
 				if (NULL != glXSwapIntervalEXT)
 				{
 					BX_TRACE("Using glXSwapIntervalEXT.");
-					glXSwapIntervalEXT(m_display, (::Window)g_platformData.nwh, 0);
+                    if(g_platformData.nwh) glXSwapIntervalEXT(m_display, (::Window)g_platformData.nwh, 0);
 					foundSwapControl = true;
 				}
 			}
@@ -276,7 +276,7 @@ namespace bgfx { namespace gl
 
 		glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 		glClear(GL_COLOR_BUFFER_BIT);
-		glXSwapBuffers(m_display, (::Window)g_platformData.nwh);
+        if(g_platformData.nwh) glXSwapBuffers(m_display, (::Window)g_platformData.nwh);
 
 		g_internalData.context = m_context;
 	}
@@ -306,7 +306,7 @@ namespace bgfx { namespace gl
 
 		if (NULL != glXSwapIntervalEXT)
 		{
-			glXSwapIntervalEXT(m_display, (::Window)g_platformData.nwh, interval);
+            if(g_platformData.nwh) glXSwapIntervalEXT(m_display, (::Window)g_platformData.nwh, interval);
 		}
 		else if (NULL != glXSwapIntervalMESA)
 		{
@@ -331,7 +331,7 @@ namespace bgfx { namespace gl
 	void GlContext::destroySwapChain(SwapChainGL* _swapChain)
 	{
 		BX_DELETE(g_allocator, _swapChain);
-		glXMakeCurrent(m_display, (::Window)g_platformData.nwh, m_context);
+        if(g_platformData.nwh) glXMakeCurrent(m_display, (::Window)g_platformData.nwh, m_context);
 	}
 
 	void GlContext::swap(SwapChainGL* _swapChain)
@@ -340,7 +340,7 @@ namespace bgfx { namespace gl
 
 		if (NULL == _swapChain)
 		{
-			glXSwapBuffers(m_display, (::Window)g_platformData.nwh);
+            if(g_platformData.nwh) glXSwapBuffers(m_display, (::Window)g_platformData.nwh);
 		}
 		else
 		{
@@ -356,7 +356,7 @@ namespace bgfx { namespace gl
 
 			if (NULL == _swapChain)
 			{
-				glXMakeCurrent(m_display, (::Window)g_platformData.nwh, m_context);
+                if(g_platformData.nwh) glXMakeCurrent(m_display, (::Window)g_platformData.nwh, m_context);
 			}
 			else
 			{

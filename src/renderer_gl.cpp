@@ -2223,7 +2223,11 @@ namespace bgfx { namespace gl
     class GlContextHolder{
     public:
         GlContextHolder(){
-            if(getenv("BGFX_RUNTIME_REQUEST_EGL")){
+//            if(getenv("BGFX_RUNTIME_REQUEST_EGL")){
+//                m_eglRequest = true;
+//            }
+            m_eglContext.import();
+            if(m_eglContext.currentContext()){
                 m_eglRequest = true;
             }
         }
@@ -2283,12 +2287,12 @@ namespace bgfx { namespace gl
         void import(){
             if(m_eglRequest){
                 //also import glx functions
-                m_eglContext.import();
                 m_glxContext.import();
+                m_eglContext.import();
             }
             else{
-                m_glxContext.import();
                 m_eglContext.import();
+                m_glxContext.import();
             }
         }
         bool isValid() const{

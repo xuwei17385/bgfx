@@ -459,7 +459,11 @@ EGL_IMPORT
 			}
 		}
 	}
-
+    EGLContext EglContext::currentContext(){
+        if(eglGetCurrentContext)
+            return eglGetCurrentContext();
+        return nullptr;
+    }
     void EglContext::import()
 	{
 		BX_TRACE("Import:");
@@ -494,9 +498,16 @@ EGL_IMPORT
 			}
 
 #	endif // BX_PLATFORM_
+#if BGFX_CONFIG_RENDERER_OPENGL
+#undef BGFX_CONFIG_RENDERER_OPENGL
+#define BGFX_CONFIG_RENDERER_OPENGL 0
+#endif
+#undef BGFX_CONFIG_RENDERER_OPENGLES
+#define BGFX_CONFIG_RENDERER_OPENGLES 30
 
 #	include "glimports.h"
 
+        eglOpen();
 #	undef GL_EXTENSION
 	}
 

@@ -47,7 +47,7 @@ namespace bgfx { namespace gl
 		{
 			return NULL != m_context;
 		}
-
+        EGLContext currentContext();
 		void* m_eglLibrary;
         SwapChainEGL* m_current;
 		EGLConfig  m_config;
@@ -74,6 +74,7 @@ namespace bgfx { namespace gl
         void makeCurrent(SwapChainGL* _swapChain = nullptr){}
         void import(){}
         bool isValid() const{return false;}
+        EGLContext currentContext()(return NULL;)
     };
 }
 }

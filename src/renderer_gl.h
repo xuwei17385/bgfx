@@ -6,6 +6,7 @@
 #ifndef BGFX_RENDERER_GL_H_HEADER_GUARD
 #define BGFX_RENDERER_GL_H_HEADER_GUARD
 
+#include <cstdio>
 #define BGFX_USE_EGL (BGFX_CONFIG_RENDERER_OPENGLES && (0 \
 	|| BX_PLATFORM_ANDROID                                \
 	|| BX_PLATFORM_BSD                                    \
@@ -1656,7 +1657,7 @@ namespace bgfx { namespace gl
 
 			GL_CHECK(glQueryCounter(query.m_end
 				, GL_TIMESTAMP
-				) );
+                ) );
 
 			while (update() )
 			{
@@ -1674,16 +1675,17 @@ namespace bgfx { namespace gl
 					return false;
 				}
 
-				GLint available;
-//XUWEI-FIX TODO
-//				GL_CHECK(glGetQueryObjectiv(query.m_end
-//					, GL_QUERY_RESULT_AVAILABLE
-//					, &available
-//					) );
+                GLint available = 0;
+
+                GLenum gl_err = 0;
                 glGetQueryObjectiv(query.m_end
-                                    , GL_QUERY_RESULT_AVAILABLE
-                                    , &available
-                                    );
+                    , GL_QUERY_RESULT_AVAILABLE
+                    , &available
+                    );
+                gl_err = glGetError();
+                if(gl_err != GL_NO_ERROR){
+                    available = 0;
+                }
 
 				if (available)
 				{
